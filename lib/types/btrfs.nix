@@ -71,6 +71,24 @@
       default = _dev: { };
       description = "Metadata";
     };
+    _update = diskoLib.mkCreateOption {
+      inherit config options;
+      default = ''
+        if ! (blkid ${config.device} -o export | grep -q '^TYPE=btrfs$'); then
+          mkfs.btrfs ${config.device} ${toString config.extraArgs}
+        fi
+        ${lib.concatMapStrings (subvol: ''
+          (
+            MNTPOINT=$(mktemp -d)
+            mount ${config.device} "$MNTPOINT" -o subvol=/
+            trap 'umount $MNTPOINT; rm -rf $MNTPOINT' EXIT
+            if ! btrfs subvolume show "$MNTPOINT"/${subvol.name} > /dev/null 2>&1; then
+              btrfs subvolume create "$MNTPOINT"/${subvol.name} ${toString subvol.extraArgs}
+            fi
+          )
+        '') (lib.attrValues config.subvolumes)}
+      '';
+    };
     _create = diskoLib.mkCreateOption {
       inherit config options;
       default = ''
@@ -97,7 +115,7 @@
                 (subvol.mountpoint != null)
                 {
                   ${subvol.mountpoint} = ''
-                    if ! findmnt ${config.device} "${rootMountPoint}${subvol.mountpoint}" > /dev/null 2>&1; then
+                    if ! findmnt --source ${config.device} --mountpoint "${rootMountPoint}${subvol.mountpoint}" > /dev/null 2>&1; then
                       mount ${config.device} "${rootMountPoint}${subvol.mountpoint}" \
                       ${lib.concatMapStringsSep " " (opt: "-o ${opt}") (subvol.mountOptions ++ [ "subvol=${subvol.name}" ])} \
                       -o X-mount.mkdir
@@ -110,7 +128,7 @@
         {
           fs = subvolMounts // lib.optionalAttrs (config.mountpoint != null) {
             ${config.mountpoint} = ''
-              if ! findmnt ${config.device} "${rootMountPoint}${config.mountpoint}" > /dev/null 2>&1; then
+              if ! findmnt --source ${config.device} --mountpoint "${rootMountPoint}${config.mountpoint}" > /dev/null 2>&1; then
                 mount ${config.device} "${rootMountPoint}${config.mountpoint}" \
                 ${lib.concatMapStringsSep " " (opt: "-o ${opt}") config.mountOptions} \
                 -o X-mount.mkdir
